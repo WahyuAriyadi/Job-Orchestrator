@@ -207,12 +207,3 @@ the poll interval into a busy-loop.
 goroutine and moves straight on to the next one — it doesn't wait for the
 callback to finish before checking what else is due. One slow endpoint
 shouldn't be able to stall every other job's schedule.
-
-## What I'd add next
-
-- A Terraform module to deploy this on Cloud Run + Cloud SQL, in the same
-  style as an earlier project of mine (UMKM-in-a-Box).
-- Swap the polling loop for `pg_notify`/`LISTEN` so dispatch latency isn't
-  tied to the poll interval.
-- Per-job concurrency limits, and a `/metrics` endpoint so this could
-  actually sit behind Prometheus in a real deployment.
