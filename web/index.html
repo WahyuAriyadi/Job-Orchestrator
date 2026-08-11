@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>orchestratord :: job dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <div class="topbar">
+    <div class="brand"><span class="prompt">$</span>&nbsp;orchestratord<span class="cursor"></span></div>
+    <div style="display:flex; align-items:center; gap: 14px;">
+      <div class="api-config">
+        <span>API:</span>
+        <input v-model="apiBase" @change="fetchAll" spellcheck="false">
+      </div>
+      <div class="status-pill">
+        <span class="dot" :class="healthDotClass"></span>
+        <span>{{ healthLabel }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- LEFT: job list -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>jobs ({{ jobs.length }})</h2>
+        <button class="primary small" @click="openCreateForm">+ new job</button>
+      </div>
+
+      <div v-if="jobs.length === 0" class="empty-state">
+        belum ada job terdaftar.<br>klik "+ new job" untuk membuat yang pertama.
+      </div>
+
+      <div v-for="job in jobs" :key="job.id"
+           class="job-row" :class="{selected: selectedJobId === job.id}"
+           @click="selectJob(job)">
+        <div>
+          <div class="job-name">{{ job.name }}</div>
+          <div class="job-meta">
+            <span>{{ job.cron_expression }}</span>
+            <span>·</span>
+            <span>{{ job.http_method }} {{ shortUrl(job.callback_url) }}</span>
+            <span>·</span>
+            <span>next: {{ formatTime(job.next_run_at) }}</span>
+          </div>
+        </div>
+        <span class="badge" :class="job.enabled ? 'on' : 'off'">{{ job.enabled ? 'enabled' : 'paused' }}</span>
+        <div class="job-actions" @click.stop>
+          <button class="small" @click="triggerJob(job)" title="jalankan sekarang">▶ run</button>
+          <button class="small" @click="openEditForm(job)" title="edit">edit</button>
+        </div>
+        <div class="job-actions" @click.stop>
+          <button class="small danger" @click="deleteJob(job)" title="hapus">del</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: form or execution history -->
+    <div>
+      <div class="panel" v-if="formMode">
+        <div class="panel-header">
+          <h2>{{ formMode === 'create' ? 'new job' : 'edit job' }}</h2>
+          <button class="ghost small" @click="closeForm">✕</button>
+        </div>
+        <div class="panel-body">
+          <div v-if="formError" class="error-box">{{ formError }}</div>
+
+          <div class="field">
+            <label>name</label>
+            <input v-model="form.name" placeholder="cek-stok-harian">
+          </div>
+
+          <div class="field">
+            <label>cron expression (min hour dom month dow)</label>
+            <input v-model="form.cron_expression" placeholder="*/15 * * * *">
+            <div class="cron-hint">{{ cronHint }}</div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>http method</label>
+              <select v-model="form.http_method">
+                <option>POST</option><option>GET</option><option>PUT</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>timeout (detik)</label>
+              <input v-model.number="form.timeout_seconds" type="number" min="1">
+            </div>
+          </div>
+
+          <div class="field">
+            <label>callback url</label>
+            <input v-model="form.callback_url" placeholder="https://api.contoh.com/webhooks/job">
+          </div>
+
+          <div class="field">
+            <label>payload (JSON, opsional)</label>
+            <textarea v-model="form.payloadText" placeholder='{"task": "cek_stok"}'></textarea>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>max retries</label>
+              <input v-model.number="form.max_retries" type="number" min="0" max="10">
+            </div>
+            <div class="field checkbox-row" style="margin-top: 24px;">
+              <input type="checkbox" id="enabled" v-model="form.enabled">
+              <label for="enabled" style="margin:0;">enabled</label>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button class="primary" @click="submitForm" :disabled="saving">{{ saving ? 'saving...' : 'save' }}</button>
+            <button class="ghost" @click="closeForm">cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" v-else>
+        <div class="panel-header">
+          <h2>{{ selectedJob ? 'execution history — ' + selectedJob.name : 'execution history' }}</h2>
+          <button class="ghost small" v-if="selectedJobId" @click="refreshExecutions">↻</button>
+        </div>
+        <div v-if="!selectedJobId" class="empty-state">pilih job di kiri untuk lihat riwayat eksekusi.</div>
+        <div v-else-if="executions.length === 0" class="empty-state">belum ada eksekusi tercatat.</div>
+        <div v-else>
+          <div v-for="ex in executions" :key="ex.id" class="exec-row">
+            <div class="exec-top">
+              <span class="exec-status" :class="ex.status">{{ ex.status }}</span>
+              <span style="color:var(--muted)">attempt {{ ex.attempt }} · {{ formatTime(ex.started_at) }}</span>
+            </div>
+            <div class="exec-detail">
+              <span v-if="ex.http_status">HTTP {{ ex.http_status }}</span>
+              <span v-if="ex.duration_ms !== null"> · {{ ex.duration_ms }}ms</span>
+              <div v-if="ex.error_message" style="color: var(--danger); margin-top:3px;">{{ ex.error_message }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
