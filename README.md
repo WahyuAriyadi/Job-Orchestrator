@@ -86,6 +86,56 @@ driver (`lib/pq`).
 
 ## Getting it running
 
+### Windows (PowerShell)
+
+This is my daily setup, so these are the commands I actually use:
+
+```powershell
+# spin up Postgres
+docker compose up -d
+
+# apply the schema — runs inside the container, so no local psql install needed
+Get-Content migrations/001_init.sql | docker compose exec -T postgres psql -U postgres -d orchestrator
+
+# run the API + scheduler
+$env:DATABASE_URL = "postgres://postgres:postgres@localhost:5432/orchestrator?sslmode=disable"
+$env:HTTP_PORT = "8080"
+go run ./cmd/server
+# → listening on :8080
+```
+
+Then, in a second PowerShell window, serve the dashboard:
+
+```powershell
+cd web
+python -m http.server 5173
+# → open http://localhost:5173
+```
+
+Prefer loading everything from `.env` instead of setting variables one by
+one? This one-liner reads the file and exports each line into the current
+session:
+
+```powershell
+Copy-Item .env.example .env
+Get-Content .env | Where-Object { $_ -match '=' -and $_ -notmatch '^\s*#' } | ForEach-Object {
+    $key, $value = $_ -split '=', 2
+    Set-Item -Path "Env:$($key.Trim())" -Value $value.Trim()
+}
+go run ./cmd/server
+```
+
+No Docker? Point it at any Postgres you've already got (requires `psql` on
+your `PATH` — it ships with the official PostgreSQL installer):
+
+```powershell
+$env:DATABASE_URL = "postgres://user:pass@host:5432/dbname?sslmode=disable"
+psql "$env:DATABASE_URL" -f migrations/001_init.sql
+go run ./cmd/server
+```
+
+### macOS / Linux
+
 ```bash
 # spin up Postgres
 docker compose up -d
@@ -104,14 +154,28 @@ make dashboard
 No Docker? Point it at any Postgres you've already got:
 
 ```bash
+export DATABASE_URL="postgres://user:pass@host:5432/dbname?sslmode=disable"
 psql "$DATABASE_URL" -f migrations/001_init.sql
-DATABASE_URL="postgres://user:pass@host:5432/dbname?sslmode=disable" go run ./cmd/server
+go run ./cmd/server
 ```
 
 ### Seeing the leader election actually work
 
-This is the part I'd actually demo in an interview:
+This is the part I'd actually demo in an interview. Two instances, two ports:
 
+**PowerShell** (run each line in its own window):
+```powershell
+$env:HTTP_PORT = "8080"; go run ./cmd/server   # terminal 1 — grabs leadership
+```
+```powershell
+$env:HTTP_PORT = "8081"; go run ./cmd/server   # terminal 2 — sits in standby
+```
+```powershell
+Invoke-RestMethod http://localhost:8080/api/health   # is_leader : True
+Invoke-RestMethod http://localhost:8081/api/health   # is_leader : False
+```
+
+**bash:**
 ```bash
 HTTP_PORT=8080 go run ./cmd/server   # terminal 1 — grabs leadership
 HTTP_PORT=8081 go run ./cmd/server   # terminal 2 — sits in standby
@@ -138,6 +202,25 @@ later. It'll have taken over — no manual failover, no restart needed.
 
 Creating a job looks like this:
 
+**PowerShell** — note this uses `Invoke-RestMethod`, not `curl`. PowerShell
+aliases `curl` to `Invoke-WebRequest`, which doesn't take `-X` or `-d` the
+way you'd expect, so it'll just error out if you paste the bash version in
+as-is:
+
+```powershell
+$body = @{
+    name            = "daily-stock-check"
+    cron_expression = "0 8 * * *"
+    callback_url    = "https://api.example.com/webhooks/stock-check"
+    payload         = @{ warehouse = "main" }
+    max_retries     = 3
+    timeout_seconds = 30
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8080/api/jobs" -Method Post -ContentType "application/json" -Body $body
+```
+
+**bash:**
 ```bash
 curl -X POST localhost:8080/api/jobs \
   -H "Content-Type: application/json" \
