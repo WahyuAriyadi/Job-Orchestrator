@@ -164,18 +164,22 @@ go run ./cmd/server
 This is the part I'd actually demo in an interview. Two instances, two ports:
 
 **PowerShell** (run each line in its own window):
+
 ```powershell
 $env:HTTP_PORT = "8080"; go run ./cmd/server   # terminal 1 — grabs leadership
 ```
+
 ```powershell
 $env:HTTP_PORT = "8081"; go run ./cmd/server   # terminal 2 — sits in standby
 ```
+
 ```powershell
 Invoke-RestMethod http://localhost:8080/api/health   # is_leader : True
 Invoke-RestMethod http://localhost:8081/api/health   # is_leader : False
 ```
 
 **bash:**
+
 ```bash
 HTTP_PORT=8080 go run ./cmd/server   # terminal 1 — grabs leadership
 HTTP_PORT=8081 go run ./cmd/server   # terminal 2 — sits in standby
@@ -189,16 +193,16 @@ later. It'll have taken over — no manual failover, no restart needed.
 
 ## API
 
-| Method | Path                        | What it does                                  |
-|--------|-----------------------------|------------------------------------------------|
-| POST   | `/api/jobs`                 | Create a job                                    |
-| GET    | `/api/jobs`                 | List all jobs                                   |
-| GET    | `/api/jobs/{id}`             | Get a single job                                |
-| PUT    | `/api/jobs/{id}`             | Update a job (partial updates supported)        |
-| DELETE | `/api/jobs/{id}`             | Delete a job                                    |
-| POST   | `/api/jobs/{id}/trigger`     | Run a job right now, outside its normal schedule|
-| GET    | `/api/jobs/{id}/executions`  | See the execution history for a job             |
-| GET    | `/api/health`                | Health check + whether this instance is leader  |
+| Method | Path                          | What it does                                     |
+| ------ | ----------------------------- | ------------------------------------------------ |
+| POST   | `/api/jobs`                 | Create a job                                     |
+| GET    | `/api/jobs`                 | List all jobs                                    |
+| GET    | `/api/jobs/{id}`            | Get a single job                                 |
+| PUT    | `/api/jobs/{id}`            | Update a job (partial updates supported)         |
+| DELETE | `/api/jobs/{id}`            | Delete a job                                     |
+| POST   | `/api/jobs/{id}/trigger`    | Run a job right now, outside its normal schedule |
+| GET    | `/api/jobs/{id}/executions` | See the execution history for a job              |
+| GET    | `/api/health`               | Health check + whether this instance is leader   |
 
 Creating a job looks like this:
 
@@ -221,6 +225,7 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/jobs" -Method Post -ContentTyp
 ```
 
 **bash:**
+
 ```bash
 curl -X POST localhost:8080/api/jobs \
   -H "Content-Type: application/json" \
@@ -240,13 +245,13 @@ Standard 5-field format — `minute hour day-of-month month day-of-week`
 (Sunday = 0). Supports `*`, single values, comma lists (`1,15,30`), ranges
 (`1-5`), and steps (`*/15`).
 
-| Expression     | Runs                              |
-|-----------------|-------------------------------------|
-| `* * * * *`     | every minute                        |
-| `*/15 * * * *`  | every 15 minutes                    |
-| `0 9 * * *`     | daily at 9am                        |
-| `0 9 * * 1-5`   | 9am, Monday through Friday          |
-| `0 0 1 * *`     | midnight on the 1st of every month  |
+| Expression       | Runs                               |
+| ---------------- | ---------------------------------- |
+| `* * * * *`    | every minute                       |
+| `*/15 * * * *` | every 15 minutes                   |
+| `0 9 * * *`    | daily at 9am                       |
+| `0 9 * * 1-5`  | 9am, Monday through Friday         |
+| `0 0 1 * *`    | midnight on the 1st of every month |
 
 ## Project layout
 
@@ -290,12 +295,3 @@ the poll interval into a busy-loop.
 goroutine and moves straight on to the next one — it doesn't wait for the
 callback to finish before checking what else is due. One slow endpoint
 shouldn't be able to stall every other job's schedule.
-
-## What I'd add next
-
-- A Terraform module to deploy this on Cloud Run + Cloud SQL, in the same
-  style as an earlier project of mine (UMKM-in-a-Box).
-- Swap the polling loop for `pg_notify`/`LISTEN` so dispatch latency isn't
-  tied to the poll interval.
-- Per-job concurrency limits, and a `/metrics` endpoint so this could
-  actually sit behind Prometheus in a real deployment.
